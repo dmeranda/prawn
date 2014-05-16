@@ -1,14 +1,18 @@
 # encoding: utf-8
 #
-# Colors in Prawn are specified using CSS, the same as in HTML or SVG.
+# Colors in Prawn may be specified using CSS, the same as in HTML or SVG.
 # It can understand simple CSS colors like <code>black</code> or
 # <code>#A27010</code>, as well as the powerful function-like
 # syntaxes.  This allows you to include both RGB and CMYK colors in
 # your PDF document. You can even use a variety of other more
 # intuitive color spaces such as HSL and HWB, and they will be
-# converted into the appropriate PDF color.  For convienience
-# Prawn will recognize <code>cmyk()</code> as an alias to the
-# official <code>device-cmyk()</code> CSS function.
+# converted into the appropriate PDF color.  There is no support for
+# CIE calibrated colors, such as ICC or Lab.
+#
+# For convienience Prawn will recognize <code>cmyk()</code> as an
+# alias to the official <code>device-cmyk()</code> CSS function.
+# Remember that CMYK is subtractive, so higher numbers result in
+# darker colors.
 #
 # As well as CSS, Prawn continues to support it's traditional color
 # naming syntaxes: a 6-digit hex string like <code>"1077C2"</code> for
@@ -21,9 +25,6 @@
 # color with an alpha value less than 1.0.  It also does not support
 # the advanced <code>color()</code> adjustment and blending functions
 # proposed in CSS level 4.
-#
-# Prawn does not provide support for outputting CIE calibrated colors,
-# such as ICC or Lab.
 #
 # For more information about the available ways to name colors in CSS
 # see the standards:
@@ -38,7 +39,7 @@ require File.expand_path(File.join(File.dirname(__FILE__),
 filename = File.basename(__FILE__).gsub('.rb', '.pdf')
 Prawn::Example.generate(filename) do
   ["black", "crimson", "#00CC22", "gray(55%)",
-   "rgb(0, 0.2, 0.7)", "rgb(80%, 0, 50%)",
+   "rgb(0, 80, 255)", "rgb(80%, 0, 50%)",
    "cmyk(0.8, 0.25, 0, 0.3)", "cmyk(10%, 30%, 70%, 60%)",
    "hsl(220deg, 80%, 30%)", "hsl(yellowish green, 100%, 40%)",
    "hwb(purple blue, 33.3%, 0.4)",
