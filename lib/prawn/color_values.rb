@@ -56,7 +56,12 @@ module Prawn
 
     # Is the float near zero?
     def eq_zero?( n )
-      n < 0.001 && n > -0.001
+      -0.001 < n && n < 0.001
+    end
+
+    # Is the float near one?
+    def eq_one?( n )
+      0.999 < n && n < 1.001
     end
 
     # Is the float near zero or less?
@@ -369,9 +374,22 @@ module Prawn
       end
     end
 
-    # Returns the gray channel (0.0=black to 1.0=white)
+    # Returns the gray channel (0.0=black to 1.0=white).
     def gray
-      @comp[:gray] if @ct == :GRAY
+      case @ct
+      when :GRAY
+        @comp[:gray]
+      when :RGB
+        r,g,b = rgb
+        (r==g && g==b) ? r : nil
+      when :HSL
+        eq_zero?(@comp[:sat]==0) ? @comp[:lite] : nil
+      when :HWB
+        eq_one?(@comp[:wht] + @comp[:blk]) ? @comp[:wht] : nil
+      when :CMYK
+        c,m,y,k = cmyk
+        (c==m && m==y) ? 1.0 - clamp(c+k) : nil
+      end
     end
 
     # Sets the gray channel (0.0=black to 1.0=white)
@@ -383,7 +401,8 @@ module Prawn
       when :RGB
         [:r,:g,:b].each {|s| @comp[s] = n}
       when :CMYK
-        [:c,:m,:y,:k].each {|s| @comp[s] = n}
+        [:c,:m,:y].each {|s| @comp[s] = 0}
+        @comp[:k] = 1.0 - n
       else
         raise ArgumentError, "Gray level may not be set on #{@ct} color"
       end
@@ -394,6 +413,8 @@ module Prawn
       case @ct
       when :RGB, :HSL, :HWB
         [@comp[:r], @comp[:g], @comp[:b]]
+      when :CMYK
+        [red, green, blue]  # compute on the fly
       end
     end
 
@@ -402,6 +423,9 @@ module Prawn
       case @ct
       when :RGB, :HSL, :HWB
         @comp[:r]
+      when :CMYK
+        # The niave CSS method for RGB conversion, ignores gamut mismatch
+        1.0 - [1.0, @comp[:c] + @comp[:k]].min   # Inverse of cyan
       end
     end
 
@@ -419,6 +443,9 @@ module Prawn
       case @ct
       when :RGB, :HSL, :HWB
         @comp[:g]
+      when :CMYK
+        # The niave CSS method for RGB conversion, ignores gamut mismatch
+        1.0 - [1.0, @comp[:m] + @comp[:k]].min   # Inverse of magenta
       end
     end
 
@@ -436,6 +463,9 @@ module Prawn
       case @ct
       when :RGB, :HSL, :HWB
         @comp[:b]
+      when :CMYK
+        # The niave CSS method for RGB conversion, ignores gamut mismatch
+        1.0 -[1.0, @comp[:y] + @comp[:k]].min   # Inverse of yellow
       end
     end
 
@@ -533,7 +563,7 @@ module Prawn
       @comp[:hue] if @ct == :HSL or @ct == :HWB
     end
 
-    # Sets the hue, either a number 0 to 260 or a hue name
+    # Sets the hue, either a number 0 to 360 or a hue name
     def hue=(h)
       case @ct
       when :HSL, :HWB
@@ -647,9 +677,9 @@ module Prawn
       when :HSL
         @comp[:lite] == 1.0
       when :HWB
-        @comp[:wht] == 1.0 && @comp[:blk] == 0
+        @comp[:wht] >= 1.0 && @comp[:blk] == 0
       when :CMYK
-        @comp[:k] == 1.0
+        @comp[:c] == 0 && @comp[:m] == 0 && @comp[:y] == 0 && @comp[:k] == 0
       end
     end
 
@@ -668,7 +698,11 @@ module Prawn
       when :HWB
         @comp[:wht] == 0 && @comp[:blk] == 1.0
       when :CMYK
-        @comp[:k] == 0
+        # Use "process black" rules to naively compare to
+        # RGB-black. Actual print or "rich black" may be more strict,
+        # as CMYK has many different blacks.
+        c,m,y,k = cmyk
+        (c+k) >= 1 && (m+k) >= 1 && (y+k) >= 1
       end
     end
 
@@ -682,9 +716,9 @@ module Prawn
       when :RGB,
         @comp[:r] == @comp[:g] && @comp[:g] == @comp[:b]
       when :HSL
-        @comp[:sat] == 0.0
+        eq_zero?(@comp[:sat])
       when :HWB
-        @comp[:wht] + @comp[:blk] >= 1.0
+        ge_one?(@comp[:wht] + @comp[:blk])
       when :CMYK
         @comp[:c] == @comp[:m] && @comp[:m] == @comp[:y]
       end
@@ -720,6 +754,8 @@ module Prawn
       when :GRAY
         v = @comp[:gray]
         s = "%02x%02x%02x" % [v,v,v]
+        s = s + "%02x" % (@alpha*255) if @alpha < 1.0
+        s
       else
         to_css
       end
@@ -731,7 +767,11 @@ module Prawn
       when :TRANSPARENT
         'transparent'
       when :GRAY
-        "gray(%s)" % f_to_pct(@comp[:gray])
+        if @alpha < 1.0
+          "gray(%s,%s)" % [f_to_pct(@comp[:gray]), f_to_pct(@alpha)]
+        else
+          "gray(%s)" % f_to_pct(@comp[:gray])
+        end
       when :RGB
         s = [:r,:g,:b].collect{|s| f_to_pct(@comp[s]) }.join(',')
         if @alpha < 1.0
@@ -814,7 +854,7 @@ module Prawn
     #
     # The transparent and alpha-channel CSS syntax is also accepted
     # and parsed by this class; however the rest of Prawn is unable
-    # to use such non-opaqe colors.
+    # to use such non-opaque colors.
     #
     def set(name)
       if name.is_a? Array
@@ -837,9 +877,9 @@ module Prawn
       # Look up known color names first and covert to equivalent color.
       # Also catch "black" and "white" early and force to grayscale.
       name = case name
-             when "black", "#000000"
+             when "black", "#000000", "#000", "000000"
                "gray(0)"
-             when "white", "#ffffff"
+             when "white", "#ffffff", "#fff", "ffffff"
                "gray(1)"
              else
                CSS_NAMED_COLORS.fetch(name,name)
